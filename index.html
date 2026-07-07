@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="description" content="A live 3D ADS-B aircraft tracker on a satellite-imagery globe." />
+  <title>SkySphere Live — 3D Flight Tracker</title>
+  <script>
+    window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/";
+  </script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <noscript>This site needs JavaScript to render the 3D globe and live aircraft.</noscript>
+
+  <main id="app" aria-label="SkySphere Live 3D flight tracker">
+    <div id="cesiumContainer" aria-label="Interactive 3D Earth"></div>
+
+    <header class="topbar glass">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✈</div>
+        <div>
+          <h1>SkySphere <span>Live</span></h1>
+          <p>Live ADS-B aircraft in true 3D altitude</p>
+        </div>
+      </div>
+      <div class="live-status" id="liveStatus" role="status" aria-live="polite">
+        <span class="status-dot"></span>
+        <span id="statusText">Starting…</span>
+      </div>
+    </header>
+
+    <section class="control-panel glass" aria-label="Map controls">
+      <div class="control-row compact-stats">
+        <div><strong id="aircraftCount">0</strong><span>aircraft</span></div>
+        <div><strong id="lastUpdate">—</strong><span>last update</span></div>
+        <div><strong id="scanRadiusLabel">100 NM</strong><span>scan radius</span></div>
+      </div>
+
+      <div class="control-group">
+        <label for="radiusSelect">Area radius</label>
+        <select id="radiusSelect">
+          <option value="25">25 NM</option>
+          <option value="50">50 NM</option>
+          <option value="100" selected>100 NM</option>
+          <option value="150">150 NM</option>
+          <option value="250">250 NM</option>
+        </select>
+      </div>
+
+      <div class="button-grid">
+        <button id="scanViewBtn" type="button">◎ Scan view centre</button>
+        <button id="locateBtn" type="button">⌖ Use my location</button>
+        <button id="refreshBtn" type="button">↻ Refresh now</button>
+        <button id="homeBtn" type="button">⌂ Stansted view</button>
+      </div>
+
+      <div class="toggle-grid">
+        <label class="switch-row"><input id="labelsToggle" type="checkbox" checked /><span>Labels</span></label>
+        <label class="switch-row"><input id="stemsToggle" type="checkbox" checked /><span>Altitude stems</span></label>
+        <label class="switch-row"><input id="trailsToggle" type="checkbox" checked /><span>Recent trails</span></label>
+        <label class="switch-row"><input id="autoRefreshToggle" type="checkbox" checked /><span>Auto refresh</span></label>
+      </div>
+
+      <details>
+        <summary>Display settings</summary>
+        <div class="control-group slider-group">
+          <label for="altitudeScale">Altitude visual scale <output id="altitudeScaleLabel">1×</output></label>
+          <input id="altitudeScale" type="range" min="1" max="20" step="1" value="1" />
+          <small>1× is physically correct. Increase it only to make separation easier to see from orbit.</small>
+        </div>
+        <div class="control-group slider-group">
+          <label for="iconScale">Aircraft icon size <output id="iconScaleLabel">1.0×</output></label>
+          <input id="iconScale" type="range" min="0.6" max="2" step="0.1" value="1" />
+        </div>
+      </details>
+
+      <div class="scan-location" id="scanLocation">Scan centre: Bishop's Stortford / Stansted</div>
+      <div class="source-note">Live positions: ADSB.lol open API. Satellite imagery: Esri World Imagery. Coverage depends on volunteer receivers.</div>
+    </section>
+
+    <aside class="aircraft-panel glass hidden" id="aircraftPanel" aria-label="Selected aircraft details">
+      <button class="close-button" id="closePanelBtn" aria-label="Close aircraft information">×</button>
+      <div class="aircraft-heading">
+        <div class="aircraft-symbol">✈</div>
+        <div>
+          <h2 id="detailCallsign">Unknown</h2>
+          <p id="detailRoute">Live ADS-B target</p>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div><span>Registration</span><strong id="detailReg">—</strong></div>
+        <div><span>Aircraft</span><strong id="detailType">—</strong></div>
+        <div><span>Altitude</span><strong id="detailAltitude">—</strong></div>
+        <div><span>Ground speed</span><strong id="detailSpeed">—</strong></div>
+        <div><span>Track</span><strong id="detailTrack">—</strong></div>
+        <div><span>Vertical rate</span><strong id="detailVertical">—</strong></div>
+        <div><span>Squawk</span><strong id="detailSquawk">—</strong></div>
+        <div><span>Position age</span><strong id="detailAge">—</strong></div>
+      </div>
+      <div class="panel-actions">
+        <button id="followBtn" type="button">Follow aircraft</button>
+        <button id="groundViewBtn" type="button">View from below</button>
+      </div>
+      <p class="detail-footnote" id="detailHex">ICAO: —</p>
+    </aside>
+
+    <div class="loading glass" id="loadingOverlay" role="status">
+      <div class="spinner"></div>
+      <div>
+        <strong>Loading the live sky</strong>
+        <span id="loadingMessage">Preparing the 3D globe…</span>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Cesium.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
