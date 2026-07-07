@@ -5,12 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#07111f" />
   <meta name="description" content="A live 3D ADS-B aircraft tracker on a satellite-imagery globe." />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>SkySphere Live — 3D Flight Tracker</title>
   <script>
     window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/";
+    window.SKYSPHERE_BUILD = "2026.07.07.5";
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260707-5" />
 </head>
 <body>
   <noscript>This site needs JavaScript to render the 3D globe and live aircraft.</noscript>
@@ -78,7 +82,7 @@
       </details>
 
       <div class="scan-location" id="scanLocation">Scan centre: Bishop's Stortford / Stansted</div>
-      <div class="source-note">Live positions automatically fall back between Airplanes.live, adsb.fi and ADSB.lol, with a browser-safe relay when required. Airport data: OurAirports. METAR/TAF: Aviation Weather Center. Satellite imagery: Esri World Imagery.</div>
+      <div class="source-note">Build 2026.07.07.5 · Live positions: Airplanes.live, adsb.fi and ADSB.lol. Airport data: OurAirports. METAR/TAF: Aviation Weather Center. Satellite imagery: Esri World Imagery.</div>
     </section>
 
     <aside class="aircraft-panel glass hidden" id="aircraftPanel" aria-label="Selected aircraft details">
@@ -119,8 +123,8 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Cesium.js"></script>
-  <script src="features.js?v=20260707-4"></script>
-  <script src="network-fix.js?v=20260707-3"></script>
-  <script src="app.js?v=20260707-3"></script>
+  <script src="features.js?v=20260707-5"></script>
+  <script src="network-fix.js?v=20260707-5"></script>
+  <script src="app.js?v=20260707-5"></script>
 </body>
 </html>
