@@ -1,95 +1,151 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#07111f" />
-  <meta name="description" content="A live 3D ADS-B aircraft tracker on a satellite-imagery globe." />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06101b">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Explore live ADS-B aircraft, airport weather and traffic in true 3D on a satellite globe.">
+  <meta name="application-name" content="SkySphere Live">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>SkySphere Live — 3D Flight Tracker</title>
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://services.arcgisonline.com" crossorigin>
   <script>
-    window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/";
-    window.SKYSPHERE_BUILD = "2026.07.07.6";
+    window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@1.143.0/Build/Cesium/";
+    window.SKYSPHERE_BUILD = "2026.07.10.1";
   </script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="styles.css?v=20260707-6" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.143.0/Build/Cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="styles.css?v=20260710-1">
 </head>
 <body>
-  <noscript>This site needs JavaScript to render the 3D globe and live aircraft.</noscript>
+  <a class="skip-link" href="#controlPanel">Skip to flight controls</a>
+  <noscript>
+    <div class="noscript-message">SkySphere Live needs JavaScript to render the globe and retrieve live aircraft.</div>
+  </noscript>
 
   <main id="app" aria-label="SkySphere Live 3D flight tracker">
-    <div id="cesiumContainer" aria-label="Interactive 3D Earth"></div>
+    <section id="cesiumContainer" aria-label="Interactive 3D Earth"></section>
+    <div class="map-vignette" aria-hidden="true"></div>
 
     <header class="topbar glass">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">✈</div>
-        <div>
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="presentation">
+            <path d="M16 3.5c1.8 0 3 1.8 3 4.2v5.1l8.5 5v3.3L19 18.6v5.9l3.3 2.6v2.4L16 28l-6.3 1.5v-2.4l3.3-2.6v-5.9l-8.5 2.5v-3.3l8.5-5V7.7c0-2.4 1.2-4.2 3-4.2Z" />
+          </svg>
+        </div>
+        <div class="brand-copy">
           <h1>SkySphere <span>Live</span></h1>
-          <p>Live ADS-B aircraft in true 3D altitude</p>
+          <p>Live aircraft, airport weather and the world in 3D</p>
         </div>
       </div>
-      <div class="live-status" id="liveStatus" role="status" aria-live="polite">
-        <span class="status-dot"></span>
-        <span id="statusText">Starting…</span>
+
+      <div class="topbar-actions">
+        <div class="live-status" id="liveStatus" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-copy">
+            <strong id="statusText">Starting…</strong>
+            <small id="statusDetail">Preparing the globe</small>
+          </span>
+        </div>
+        <button class="panel-toggle" id="panelToggleBtn" type="button" aria-controls="controlPanel" aria-expanded="true">
+          <span aria-hidden="true">☰</span>
+          <span>Controls</span>
+        </button>
       </div>
     </header>
 
-    <section class="control-panel glass" aria-label="Map controls">
-      <div class="control-row compact-stats">
+    <section class="control-panel glass" id="controlPanel" aria-label="Flight map controls">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Flight map</span>
+          <h2>Explore live traffic</h2>
+        </div>
+        <button class="icon-button panel-collapse" id="panelCollapseBtn" type="button" aria-label="Hide flight controls" title="Hide controls">×</button>
+      </div>
+
+      <div class="compact-stats" role="group" aria-label="Live scan statistics">
         <div><strong id="aircraftCount">0</strong><span>aircraft</span></div>
-        <div><strong id="lastUpdate">—</strong><span>last update</span></div>
-        <div><strong id="scanRadiusLabel">100 NM</strong><span>scan radius</span></div>
+        <div><strong id="lastUpdate">—</strong><span>updated</span></div>
+        <div><strong id="scanRadiusLabel">100 NM</strong><span>radius</span></div>
       </div>
 
       <div class="control-group">
-        <label for="radiusSelect">Area radius</label>
+        <label for="radiusSelect">Scan area</label>
         <select id="radiusSelect">
-          <option value="25">25 NM</option>
-          <option value="50">50 NM</option>
-          <option value="100" selected>100 NM</option>
-          <option value="150">150 NM</option>
-          <option value="250">250 NM</option>
+          <option value="25">25 NM · Local</option>
+          <option value="50">50 NM · Nearby</option>
+          <option value="100" selected>100 NM · Regional</option>
+          <option value="150">150 NM · Wide</option>
+          <option value="250">250 NM · Maximum</option>
         </select>
       </div>
 
-      <div class="button-grid">
-        <button id="scanViewBtn" type="button">◎ Scan view centre</button>
-        <button id="locateBtn" type="button">⌖ Use my location</button>
-        <button id="refreshBtn" type="button">↻ Refresh now</button>
-        <button id="homeBtn" type="button">⌂ Stansted view</button>
+      <div class="button-grid" role="group" aria-label="Scan location actions">
+        <button id="scanViewBtn" type="button"><span aria-hidden="true">◎</span> Scan map centre</button>
+        <button id="locateBtn" type="button"><span aria-hidden="true">⌖</span> Use my location</button>
+        <button id="refreshBtn" type="button"><span class="refresh-icon" aria-hidden="true">↻</span> Refresh now</button>
+        <button id="homeBtn" type="button"><span aria-hidden="true">⌂</span> Stansted view</button>
       </div>
 
-      <div class="toggle-grid">
-        <label class="switch-row"><input id="labelsToggle" type="checkbox" checked /><span>Labels</span></label>
-        <label class="switch-row"><input id="stemsToggle" type="checkbox" checked /><span>Altitude stems</span></label>
-        <label class="switch-row"><input id="trailsToggle" type="checkbox" checked /><span>Recent trails</span></label>
-        <label class="switch-row"><input id="autoRefreshToggle" type="checkbox" checked /><span>Auto refresh</span></label>
+      <div class="toggle-grid" role="group" aria-label="Map layers">
+        <label class="switch-row">
+          <input id="labelsToggle" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Aircraft labels</span>
+        </label>
+        <label class="switch-row">
+          <input id="stemsToggle" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Altitude stems</span>
+        </label>
+        <label class="switch-row">
+          <input id="trailsToggle" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Recent trails</span>
+        </label>
+        <label class="switch-row">
+          <input id="autoRefreshToggle" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Live updates</span>
+        </label>
       </div>
 
-      <details>
-        <summary>Display settings</summary>
+      <details class="settings-group">
+        <summary>Display settings &amp; altitude key</summary>
         <div class="control-group slider-group">
-          <label for="altitudeScale">Altitude visual scale <output id="altitudeScaleLabel">1×</output></label>
-          <input id="altitudeScale" type="range" min="1" max="20" step="1" value="1" />
-          <small>1× is physically correct. Increase it only to make separation easier to see from orbit.</small>
+          <div class="slider-label"><label for="altitudeScale">Altitude visual scale</label><output id="altitudeScaleLabel" for="altitudeScale">1×</output></div>
+          <input id="altitudeScale" type="range" min="1" max="20" step="1" value="1">
+          <small>1× is physically correct. Increase it to make vertical separation easier to see from orbit.</small>
         </div>
         <div class="control-group slider-group">
-          <label for="iconScale">Aircraft icon size <output id="iconScaleLabel">1.0×</output></label>
-          <input id="iconScale" type="range" min="0.6" max="2" step="0.1" value="1" />
+          <div class="slider-label"><label for="iconScale">Aircraft icon size</label><output id="iconScaleLabel" for="iconScale">1.0×</output></div>
+          <input id="iconScale" type="range" min="0.6" max="2" step="0.1" value="1">
+        </div>
+        <div class="altitude-key" role="group" aria-label="Aircraft altitude colour key">
+          <span><i class="altitude-low"></i>Below 1,000 ft</span>
+          <span><i class="altitude-medium"></i>1,000–10,000 ft</span>
+          <span><i class="altitude-high"></i>10,000–25,000 ft</span>
+          <span><i class="altitude-cruise"></i>Above 25,000 ft</span>
         </div>
       </details>
 
       <div class="scan-location" id="scanLocation">Scan centre: Bishop's Stortford / Stansted</div>
-      <div class="source-note">Build 2026.07.07.6 · Live positions: Airplanes.live, adsb.fi and ADSB.lol. Airport data: OurAirports. METAR/TAF: Aviation Weather Center. Satellite imagery: Esri World Imagery.</div>
+      <p class="source-note">Public ADS-B coverage can be incomplete. Positions are refreshed every 15 seconds using Airplanes.live, adsb.fi or ADSB.lol.</p>
+      <div class="build-note">SkySphere <span id="buildLabel">2026.07.10.1</span> · Esri imagery · OurAirports · Aviation Weather Center</div>
     </section>
 
-    <aside class="aircraft-panel glass hidden" id="aircraftPanel" aria-label="Selected aircraft details">
-      <button class="close-button" id="closePanelBtn" aria-label="Close aircraft information">×</button>
+    <aside class="aircraft-panel glass hidden" id="aircraftPanel" aria-label="Selected aircraft details" inert>
+      <button class="icon-button close-button" id="closePanelBtn" type="button" aria-label="Close aircraft information">×</button>
       <div class="aircraft-heading">
-        <div class="aircraft-symbol">✈</div>
+        <div class="aircraft-symbol" aria-hidden="true">✈</div>
         <div>
+          <span class="eyebrow">Selected aircraft</span>
           <h2 id="detailCallsign">Unknown</h2>
           <p id="detailRoute">Live ADS-B target</p>
         </div>
@@ -111,20 +167,21 @@
       <p class="detail-footnote" id="detailHex">ICAO: —</p>
     </aside>
 
-    <div class="loading glass" id="loadingOverlay" role="status">
-      <div class="spinner"></div>
-      <div>
-        <strong>Loading the live sky</strong>
+    <div class="loading glass" id="loadingOverlay" role="status" aria-live="polite">
+      <div class="spinner" id="loadingSpinner" aria-hidden="true"></div>
+      <div class="loading-copy">
+        <strong id="loadingTitle">Loading the live sky</strong>
         <span id="loadingMessage">Preparing the 3D globe…</span>
+        <button class="loading-retry hidden" id="loadingRetryBtn" type="button">Reload SkySphere</button>
       </div>
     </div>
 
-    <div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/cesium@latest/Build/Cesium/Cesium.js"></script>
-  <script src="features-loader.js?v=20260707-6"></script>
-  <script src="network-fix.js?v=20260707-6"></script>
-  <script src="app.js?v=20260707-6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.143.0/Build/Cesium/Cesium.js"></script>
+  <script src="network-fix.js?v=20260710-1"></script>
+  <script src="features.js?v=20260710-1"></script>
+  <script src="app.js?v=20260710-1"></script>
 </body>
 </html>

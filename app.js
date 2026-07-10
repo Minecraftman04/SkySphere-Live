@@ -4,11 +4,12 @@
 
   const DEFAULT_LOCATION = { lat: 51.885, lon: 0.235, name: "Bishop's Stortford / Stansted" };
   const REFRESH_MS = 15_000;
-  const STALE_MS = 70_000;
+  const STALE_MS = 120_000;
   const MAX_AIRCRAFT = 900;
   const FEET_TO_METRES = 0.3048;
   const KNOTS_TO_MPS = 0.514444;
   const EARTH_RADIUS_M = 6_371_008.8;
+  const PREFERENCES_KEY = "skysphere-preferences-v2";
 
   const ADSB_PROVIDERS = [
     { id: "airplanes-live", name: "Airplanes.live", baseUrl: "https://api.airplanes.live/v2" },
@@ -16,59 +17,144 @@
     { id: "adsb-lol", name: "ADSB.lol", baseUrl: "https://api.adsb.lol/v2" }
   ];
 
-  const els = Object.fromEntries([
-    "liveStatus", "statusText", "aircraftCount", "lastUpdate", "scanRadiusLabel", "radiusSelect",
-    "scanViewBtn", "locateBtn", "refreshBtn", "homeBtn", "labelsToggle", "stemsToggle",
-    "trailsToggle", "autoRefreshToggle", "altitudeScale", "altitudeScaleLabel", "iconScale",
-    "iconScaleLabel", "scanLocation", "aircraftPanel", "closePanelBtn", "detailCallsign", "detailRoute",
+  const elementIds = [
+    "liveStatus", "statusText", "statusDetail", "aircraftCount", "lastUpdate", "scanRadiusLabel",
+    "radiusSelect", "scanViewBtn", "locateBtn", "refreshBtn", "homeBtn", "labelsToggle",
+    "stemsToggle", "trailsToggle", "autoRefreshToggle", "altitudeScale", "altitudeScaleLabel",
+    "iconScale", "iconScaleLabel", "scanLocation", "controlPanel", "panelToggleBtn",
+    "panelCollapseBtn", "aircraftPanel", "closePanelBtn", "detailCallsign", "detailRoute",
     "detailReg", "detailType", "detailAltitude", "detailSpeed", "detailTrack", "detailVertical",
     "detailSquawk", "detailAge", "detailHex", "followBtn", "groundViewBtn", "loadingOverlay",
-    "loadingMessage", "toast"
-  ].map((id) => [id, document.getElementById(id)]));
+    "loadingTitle", "loadingMessage", "loadingRetryBtn", "toast", "buildLabel"
+  ];
+  const els = Object.fromEntries(elementIds.map((id) => [id, document.getElementById(id)]));
+
+  function readPreferences() {
+    try {
+      const value = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "null");
+      return value && typeof value === "object" ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  const preferences = readPreferences();
+  if ([25, 50, 100, 150, 250].includes(Number(preferences.radiusNm))) {
+    els.radiusSelect.value = String(preferences.radiusNm);
+  }
+  for (const [element, key] of [
+    [els.labelsToggle, "labels"],
+    [els.stemsToggle, "stems"],
+    [els.trailsToggle, "trails"],
+    [els.autoRefreshToggle, "autoRefresh"]
+  ]) {
+    if (typeof preferences[key] === "boolean") element.checked = preferences[key];
+  }
+  if (Number.isFinite(Number(preferences.altitudeScale))) {
+    els.altitudeScale.value = String(Math.min(20, Math.max(1, Number(preferences.altitudeScale))));
+  }
+  if (Number.isFinite(Number(preferences.iconScale))) {
+    els.iconScale.value = String(Math.min(2, Math.max(0.6, Number(preferences.iconScale))));
+  }
 
   const state = {
     viewer: null,
     scan: { ...DEFAULT_LOCATION },
+    scanVersion: 0,
     radiusNm: Number(els.radiusSelect.value),
-    altitudeScale: 1,
-    iconScale: 1,
+    altitudeScale: Number(els.altitudeScale.value),
+    iconScale: Number(els.iconScale.value),
     records: new Map(),
     entities: new Map(),
     trailEntities: new Map(),
     selectedHex: null,
     followedHex: null,
-    timer: null,
+    uiTimer: null,
+    refreshTimer: null,
     loading: false,
+    refreshQueued: false,
     lastSuccessfulUpdate: 0,
+    lastResponseWasStale: false,
     providerId: null,
     providerName: null,
-    toastTimer: null
+    toastTimer: null,
+    controlsCollapsed: typeof preferences.controlsCollapsed === "boolean"
+      ? preferences.controlsCollapsed
+      : window.matchMedia("(max-width: 720px)").matches
   };
 
   const planeSvg = encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
       <path fill="#f7fbff" stroke="#07111f" stroke-width="2.4" stroke-linejoin="round"
         d="M32 3c3 0 5 3 5 7v14l18 11v6L37 35v13l7 5v5l-12-3-12 3v-5l7-5V35L9 41v-6l18-11V10c0-4 2-7 5-7z"/>
-      <circle cx="32" cy="19" r="2" fill="#53d8ff"/>
+      <circle cx="32" cy="19" r="2" fill="#71e7ff"/>
     </svg>`);
   const planeIcon = `data:image/svg+xml;charset=utf-8,${planeSvg}`;
 
-  function setStatus(kind, text) {
+  function savePreferences() {
+    const value = {
+      radiusNm: state.radiusNm,
+      labels: els.labelsToggle.checked,
+      stems: els.stemsToggle.checked,
+      trails: els.trailsToggle.checked,
+      autoRefresh: els.autoRefreshToggle.checked,
+      altitudeScale: state.altitudeScale,
+      iconScale: state.iconScale,
+      controlsCollapsed: state.controlsCollapsed
+    };
+    try {
+      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(value));
+    } catch {
+      // Storage can be disabled in privacy-focused browsers; the app still works without it.
+    }
+  }
+
+  function setStatus(kind, text, detail = "") {
     els.liveStatus.classList.remove("warning", "error");
     if (kind) els.liveStatus.classList.add(kind);
     els.statusText.textContent = text;
+    els.statusDetail.textContent = detail || "Live public ADS-B data";
   }
 
-  function showToast(message, duration = 4000) {
+  function showToast(message, duration = 4500) {
     clearTimeout(state.toastTimer);
     els.toast.textContent = message;
     els.toast.classList.add("show");
     state.toastTimer = setTimeout(() => els.toast.classList.remove("show"), duration);
   }
 
-  function setLoading(show, message = "Loading…") {
+  function setLoading(show, message = "Loading…", title = "Loading the live sky") {
+    els.loadingOverlay.classList.remove("error");
+    els.loadingRetryBtn.classList.add("hidden");
+    els.loadingTitle.textContent = title;
     els.loadingMessage.textContent = message;
     els.loadingOverlay.classList.toggle("hidden", !show);
+  }
+
+  function showFatalError(title, message) {
+    setStatus("error", title, "The 3D globe could not start");
+    els.loadingTitle.textContent = title;
+    els.loadingMessage.textContent = message;
+    els.loadingOverlay.classList.add("error");
+    els.loadingOverlay.classList.remove("hidden");
+    els.loadingRetryBtn.classList.remove("hidden");
+  }
+
+  function setRefreshBusy(busy) {
+    els.refreshBtn.disabled = busy;
+    els.refreshBtn.querySelector(".refresh-icon")?.classList.toggle("spinning", busy);
+  }
+
+  function setControlsCollapsed(collapsed, { persist = true } = {}) {
+    state.controlsCollapsed = Boolean(collapsed);
+    document.body.classList.toggle("controls-collapsed", state.controlsCollapsed);
+    els.panelToggleBtn.setAttribute("aria-expanded", String(!state.controlsCollapsed));
+    els.panelCollapseBtn.setAttribute(
+      "aria-label",
+      state.controlsCollapsed ? "Show flight controls" : "Hide flight controls"
+    );
+    els.controlPanel.inert = state.controlsCollapsed;
+    if (persist) savePreferences();
   }
 
   function safeNumber(value) {
@@ -90,15 +176,15 @@
     if (!Number.isFinite(distanceM) || distanceM === 0) return { lat: latDeg, lon: lonDeg };
     const lat1 = Cesium.Math.toRadians(latDeg);
     const lon1 = Cesium.Math.toRadians(lonDeg);
-    const brng = Cesium.Math.toRadians(bearingDeg || 0);
+    const bearing = Cesium.Math.toRadians(bearingDeg || 0);
     const angular = distanceM / EARTH_RADIUS_M;
     const sinLat1 = Math.sin(lat1);
     const cosLat1 = Math.cos(lat1);
     const sinAngular = Math.sin(angular);
     const cosAngular = Math.cos(angular);
-    const lat2 = Math.asin(sinLat1 * cosAngular + cosLat1 * sinAngular * Math.cos(brng));
+    const lat2 = Math.asin(sinLat1 * cosAngular + cosLat1 * sinAngular * Math.cos(bearing));
     const lon2 = lon1 + Math.atan2(
-      Math.sin(brng) * sinAngular * cosLat1,
+      Math.sin(bearing) * sinAngular * cosLat1,
       cosAngular - sinLat1 * Math.sin(lat2)
     );
     return {
@@ -137,13 +223,11 @@
       squawk: String(ac.squawk || "").trim(),
       category: String(ac.category || "").trim(),
       seen: safeNumber(ac.seen_pos ?? ac.seen) || 0,
-      source: String(ac.type || ac.nav_modes || "ADS-B").trim(),
-      receivedAt: Date.now(),
-      raw: ac
+      receivedAt: Date.now()
     };
   }
 
-  async function fetchJson(url, timeoutMs = 22000) {
+  async function fetchJson(url, timeoutMs = 22_000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -156,7 +240,15 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (!data || !Array.isArray(data.ac)) throw new Error("Unexpected API response");
-      return data;
+      const cacheAgeMs = Math.max(0, Number(response.headers.get("X-SkySphere-Cache-Age-Ms")) || 0);
+      return {
+        data,
+        meta: {
+          stale: response.headers.get("X-SkySphere-Stale") === "1",
+          source: response.headers.get("X-SkySphere-Source") || "direct",
+          cacheAgeMs
+        }
+      };
     } finally {
       clearTimeout(timer);
     }
@@ -175,10 +267,10 @@
     for (const provider of orderedProviders()) {
       const url = `${provider.baseUrl}/point/${lat.toFixed(5)}/${lon.toFixed(5)}/${radius}`;
       try {
-        const data = await fetchJson(url);
+        const result = await fetchJson(url);
         state.providerId = provider.id;
         state.providerName = provider.name;
-        return data;
+        return { ...result, provider };
       } catch (error) {
         errors.push(`${provider.name}: ${error?.message || error}`);
         if (state.providerId === provider.id) state.providerId = null;
@@ -194,8 +286,8 @@
 
   function aircraftColor(record) {
     if (record.altitudeFt < 1000) return Cesium.Color.fromCssColorString("#ffd36a");
-    if (record.altitudeFt < 10000) return Cesium.Color.fromCssColorString("#78ffbf");
-    if (record.altitudeFt < 25000) return Cesium.Color.fromCssColorString("#53d8ff");
+    if (record.altitudeFt < 10000) return Cesium.Color.fromCssColorString("#70f1b7");
+    if (record.altitudeFt < 25000) return Cesium.Color.fromCssColorString("#71e7ff");
     return Cesium.Color.fromCssColorString("#c9a7ff");
   }
 
@@ -234,7 +326,7 @@
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         pixelOffset: new Cesium.Cartesian2(0, -25),
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString("#07111f").withAlpha(0.72),
+        backgroundColor: Cesium.Color.fromCssColorString("#07111f").withAlpha(0.75),
         backgroundPadding: new Cesium.Cartesian2(7, 5),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 450_000),
         scaleByDistance: new Cesium.NearFarScalar(2_000, 1, 450_000, 0.68),
@@ -275,13 +367,13 @@
       trail._history = [];
       state.trailEntities.set(record.hex, trail);
     }
-    const p = Cesium.Cartesian3.fromDegrees(
+    const position = Cesium.Cartesian3.fromDegrees(
       record.lon,
       record.lat,
       record.altitudeFt * FEET_TO_METRES * state.altitudeScale
     );
     const last = trail._history[trail._history.length - 1];
-    if (!last || Cesium.Cartesian3.distance(last, p) > 80) trail._history.push(p);
+    if (!last || Cesium.Cartesian3.distance(last, position) > 80) trail._history.push(position);
     if (trail._history.length > 18) trail._history.shift();
     trail.polyline.positions = trail._history.slice();
     trail.polyline.show = els.trailsToggle.checked;
@@ -312,6 +404,25 @@
     if (state.selectedHex === hex) closeAircraftPanel();
   }
 
+  function clearTraffic() {
+    if (state.viewer) {
+      for (const entity of state.entities.values()) state.viewer.entities.remove(entity);
+      for (const trail of state.trailEntities.values()) state.viewer.entities.remove(trail);
+      state.viewer.trackedEntity = undefined;
+      state.viewer.selectedEntity = undefined;
+    }
+    state.entities.clear();
+    state.trailEntities.clear();
+    state.records.clear();
+    state.selectedHex = null;
+    state.followedHex = null;
+    state.lastSuccessfulUpdate = 0;
+    state.lastResponseWasStale = false;
+    els.aircraftCount.textContent = "0";
+    els.lastUpdate.textContent = "—";
+    closeAircraftPanel();
+  }
+
   function cleanupStale() {
     const now = Date.now();
     for (const [hex, record] of state.records) {
@@ -320,56 +431,113 @@
   }
 
   async function refreshAircraft({ quiet = false } = {}) {
-    if (state.loading) return;
+    if (!state.viewer) return;
+    if (!navigator.onLine) {
+      setStatus("error", "You are offline", "Reconnect to resume live updates");
+      return;
+    }
+    if (state.loading) {
+      state.refreshQueued = true;
+      return;
+    }
+
     state.loading = true;
-    if (!quiet) setStatus("warning", "Updating live traffic…");
+    setRefreshBusy(true);
+    const requestVersion = state.scanVersion;
+    const requestScan = { ...state.scan };
+    const requestRadius = state.radiusNm;
+    if (!quiet) setStatus("warning", "Updating live traffic…", `${requestRadius} NM around ${requestScan.name}`);
+
     try {
-      const data = await fetchAircraft(state.scan.lat, state.scan.lon, state.radiusNm);
-      const records = data.ac
+      const result = await fetchAircraft(requestScan.lat, requestScan.lon, requestRadius);
+      if (requestVersion !== state.scanVersion) return;
+
+      const dataAgeMs = result.meta.stale ? result.meta.cacheAgeMs : 0;
+      const records = result.data.ac
         .map(normaliseAircraft)
         .filter(Boolean)
         .sort((a, b) => (a.seen || 0) - (b.seen || 0))
         .slice(0, MAX_AIRCRAFT);
 
       for (const incoming of records) {
+        const receivedAt = Date.now() - Math.max(0, incoming.seen * 1000) - dataAgeMs;
         const existing = state.records.get(incoming.hex);
         if (existing) {
-          Object.assign(existing, incoming);
-          existing.receivedAt = Date.now() - Math.max(0, incoming.seen * 1000);
+          Object.assign(existing, incoming, { receivedAt });
           updateAircraftEntity(existing);
         } else {
-          incoming.receivedAt = Date.now() - Math.max(0, incoming.seen * 1000);
+          incoming.receivedAt = receivedAt;
           state.records.set(incoming.hex, incoming);
           updateAircraftEntity(incoming);
         }
       }
 
       cleanupStale();
-      state.lastSuccessfulUpdate = Date.now();
+      state.lastSuccessfulUpdate = Date.now() - dataAgeMs;
+      state.lastResponseWasStale = result.meta.stale;
       els.aircraftCount.textContent = state.records.size.toLocaleString();
-      els.lastUpdate.textContent = "now";
-      setStatus("", `${state.records.size} live aircraft · ${state.providerName || "live feed"}`);
+      updateClock();
+
+      if (result.meta.stale) {
+        const ageSeconds = Math.max(1, Math.round(dataAgeMs / 1000));
+        setStatus(
+          "warning",
+          `${state.records.size} recently seen aircraft`,
+          `${result.provider.name} cache · ${ageSeconds}s old`
+        );
+      } else {
+        const relay = result.meta.source !== "direct" && result.meta.source !== "direct provider"
+          ? ` via ${result.meta.source}`
+          : "";
+        setStatus("", `${state.records.size} live aircraft`, `${result.provider.name}${relay} · updated now`);
+      }
+
       if (state.selectedHex) updateAircraftPanel(state.selectedHex);
+      window.dispatchEvent(new CustomEvent("skysphere-traffic-updated"));
     } catch (error) {
+      if (requestVersion !== state.scanVersion) return;
       console.error("ADS-B update failed", error);
-      setStatus("error", "Live data unavailable");
-      showToast("All public ADS-B feeds failed in this browser. SkySphere will retry automatically; a hard refresh may also help.", 7500);
+      state.lastResponseWasStale = false;
+      setStatus("error", "Live data unavailable", "Automatic retry in 15 seconds");
+      showToast(
+        "The public ADS-B feeds did not respond in this browser. The globe still works and SkySphere will retry automatically.",
+        7000
+      );
     } finally {
       state.loading = false;
+      setRefreshBusy(false);
       setLoading(false);
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+        queueMicrotask(() => refreshAircraft({ quiet: false }));
+      }
     }
   }
 
-  function startTimer() {
-    clearInterval(state.timer);
-    state.timer = setInterval(() => {
+  function formatAge(seconds) {
+    if (seconds < 2) return "now";
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+  }
+
+  function updateClock() {
+    if (!state.lastSuccessfulUpdate) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - state.lastSuccessfulUpdate) / 1000));
+    els.lastUpdate.textContent = formatAge(seconds);
+    if (seconds > 45 && !state.loading && navigator.onLine) {
+      setStatus("warning", "Traffic feed delayed", `Last usable update ${formatAge(seconds)} ago`);
+    }
+    if (state.selectedHex) updateAircraftPanel(state.selectedHex);
+  }
+
+  function startTimers() {
+    clearInterval(state.uiTimer);
+    clearInterval(state.refreshTimer);
+    state.uiTimer = setInterval(updateClock, 1000);
+    state.refreshTimer = setInterval(() => {
       if (els.autoRefreshToggle.checked && !document.hidden) refreshAircraft({ quiet: true });
-      if (state.lastSuccessfulUpdate) {
-        const seconds = Math.floor((Date.now() - state.lastSuccessfulUpdate) / 1000);
-        els.lastUpdate.textContent = seconds < 2 ? "now" : `${seconds}s`;
-      }
-      if (state.selectedHex) updateAircraftPanel(state.selectedHex);
-    }, 1000);
+    }, REFRESH_MS);
   }
 
   function getViewCentre() {
@@ -390,8 +558,11 @@
   }
 
   function setScanLocation(lat, lon, name = null) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    state.scanVersion += 1;
     state.scan = { lat, lon, name: name || `${lat.toFixed(3)}°, ${lon.toFixed(3)}°` };
     els.scanLocation.textContent = `Scan centre: ${state.scan.name}`;
+    clearTraffic();
     refreshAircraft();
   }
 
@@ -409,7 +580,7 @@
       showToast("Location is not available in this browser.");
       return;
     }
-    setStatus("warning", "Getting your location…");
+    setStatus("warning", "Getting your location…", "Waiting for browser permission");
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         const lat = coords.latitude;
@@ -421,7 +592,7 @@
         setScanLocation(lat, lon, "Your location");
       },
       (error) => {
-        setStatus("error", "Location permission denied");
+        setStatus("error", "Location unavailable", "Choose a point on the map instead");
         showToast(`Could not use your location: ${error.message}`);
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 }
@@ -444,12 +615,15 @@
     state.selectedHex = hex;
     updateAircraftPanel(hex);
     els.aircraftPanel.classList.remove("hidden");
+    els.aircraftPanel.inert = false;
+    if (window.matchMedia("(max-width: 720px)").matches) setControlsCollapsed(true);
   }
 
   function closeAircraftPanel() {
     state.selectedHex = null;
     els.aircraftPanel.classList.add("hidden");
-    state.viewer.selectedEntity = undefined;
+    els.aircraftPanel.inert = true;
+    if (state.viewer) state.viewer.selectedEntity = undefined;
   }
 
   function updateAircraftPanel(hex) {
@@ -465,7 +639,7 @@
     els.detailTrack.textContent = `${Math.round(record.track)}°`;
     els.detailVertical.textContent = `${record.verticalRate >= 0 ? "+" : ""}${Math.round(record.verticalRate).toLocaleString()} ft/min`;
     els.detailSquawk.textContent = record.squawk || "—";
-    els.detailAge.textContent = `${age.toFixed(age < 10 ? 1 : 0)} s`;
+    els.detailAge.textContent = age < 60 ? `${age.toFixed(age < 10 ? 1 : 0)} s` : `${Math.floor(age / 60)} min`;
     els.detailHex.textContent = `ICAO: ${record.hex.toUpperCase()} · Position shown at ${state.altitudeScale}× altitude scale`;
     els.followBtn.textContent = state.followedHex === hex ? "Stop following" : "Follow aircraft";
   }
@@ -519,6 +693,9 @@
     els.radiusSelect.addEventListener("change", () => {
       state.radiusNm = Number(els.radiusSelect.value);
       els.scanRadiusLabel.textContent = `${state.radiusNm} NM`;
+      state.scanVersion += 1;
+      clearTraffic();
+      savePreferences();
       refreshAircraft();
     });
     els.scanViewBtn.addEventListener("click", scanViewCentre);
@@ -528,23 +705,32 @@
     els.closePanelBtn.addEventListener("click", closeAircraftPanel);
     els.followBtn.addEventListener("click", toggleFollow);
     els.groundViewBtn.addEventListener("click", viewFromBelow);
+    els.panelToggleBtn.addEventListener("click", () => setControlsCollapsed(!state.controlsCollapsed));
+    els.panelCollapseBtn.addEventListener("click", () => setControlsCollapsed(true));
+    els.loadingRetryBtn.addEventListener("click", () => location.reload());
 
     els.labelsToggle.addEventListener("change", () => {
       for (const entity of state.entities.values()) entity.label.show = els.labelsToggle.checked;
+      savePreferences();
     });
     els.stemsToggle.addEventListener("change", () => {
       for (const entity of state.entities.values()) entity.polyline.show = els.stemsToggle.checked;
+      savePreferences();
     });
     els.trailsToggle.addEventListener("change", () => {
       for (const entity of state.trailEntities.values()) entity.polyline.show = els.trailsToggle.checked;
+      savePreferences();
     });
     els.autoRefreshToggle.addEventListener("change", () => {
+      savePreferences();
       showToast(els.autoRefreshToggle.checked ? "Automatic live updates enabled." : "Automatic updates paused.");
+      if (els.autoRefreshToggle.checked) refreshAircraft({ quiet: true });
     });
     els.altitudeScale.addEventListener("input", () => {
       state.altitudeScale = Number(els.altitudeScale.value);
       els.altitudeScaleLabel.value = `${state.altitudeScale}×`;
       rebuildAltitudeGeometry();
+      savePreferences();
     });
     els.iconScale.addEventListener("input", () => {
       state.iconScale = Number(els.iconScale.value);
@@ -553,10 +739,51 @@
         entity.billboard.width = 30 * state.iconScale;
         entity.billboard.height = 30 * state.iconScale;
       }
+      savePreferences();
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && els.autoRefreshToggle.checked) refreshAircraft({ quiet: true });
+      if (!document.hidden && els.autoRefreshToggle.checked) {
+        const age = Date.now() - state.lastSuccessfulUpdate;
+        if (!state.lastSuccessfulUpdate || age >= REFRESH_MS) refreshAircraft({ quiet: true });
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        const airportPanel = document.getElementById("airportPanel");
+        if (airportPanel && !airportPanel.classList.contains("hidden")) {
+          airportPanel.classList.add("hidden");
+          airportPanel.inert = true;
+        } else if (!els.aircraftPanel.classList.contains("hidden")) {
+          closeAircraftPanel();
+        } else if (window.matchMedia("(max-width: 720px)").matches && !state.controlsCollapsed) {
+          setControlsCollapsed(true);
+        }
+      }
+      if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+        const airportSearch = document.getElementById("airportSearch");
+        if (airportSearch) {
+          event.preventDefault();
+          setControlsCollapsed(false);
+          airportSearch.focus();
+        }
+      }
+    });
+
+    window.addEventListener("online", () => {
+      setStatus("warning", "Connection restored", "Refreshing live traffic…");
+      refreshAircraft();
+    });
+    window.addEventListener("offline", () => {
+      setStatus("error", "You are offline", "Reconnect to resume live updates");
+    });
+    window.addEventListener("skysphere-set-scan", (event) => {
+      const { lat, lon, name } = event.detail || {};
+      setScanLocation(Number(lat), Number(lon), name);
+    });
+    window.addEventListener("skysphere-controls", (event) => {
+      setControlsCollapsed(Boolean(event.detail?.collapsed));
     });
   }
 
@@ -577,31 +804,71 @@
     }
   }
 
+  function supportsWebGL() {
+    try {
+      const canvas = document.createElement("canvas");
+      return Boolean(
+        window.WebGLRenderingContext &&
+        (canvas.getContext("webgl2", { failIfMajorPerformanceCaveat: false }) ||
+          canvas.getContext("webgl", { failIfMajorPerformanceCaveat: false }))
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async function initialise() {
+    els.scanRadiusLabel.textContent = `${state.radiusNm} NM`;
+    els.altitudeScaleLabel.value = `${state.altitudeScale}×`;
+    els.iconScaleLabel.value = `${state.iconScale.toFixed(1)}×`;
+    els.buildLabel.textContent = window.SKYSPHERE_BUILD || "current";
+    setControlsCollapsed(state.controlsCollapsed, { persist: false });
+    wireEvents();
+
     if (!window.Cesium) {
-      setStatus("error", "3D library failed to load");
-      setLoading(true, "Cesium could not be downloaded. Check your connection and reload.");
+      showFatalError(
+        "3D library unavailable",
+        "Cesium could not be downloaded. Check your connection, content blocker or firewall, then reload SkySphere."
+      );
       return;
     }
 
-    setLoading(true, "Preparing the satellite globe…");
-    const viewer = new Cesium.Viewer("cesiumContainer", {
-      baseLayer: false,
-      terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-      animation: false,
-      timeline: false,
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      infoBox: false,
-      selectionIndicator: true,
-      fullscreenButton: true,
-      vrButton: false,
-      shouldAnimate: true,
-      requestRenderMode: false
-    });
+    if (!supportsWebGL()) {
+      showFatalError(
+        "3D graphics unavailable",
+        "This browser is not currently providing WebGL, which the globe requires. Enable hardware acceleration or try an up-to-date Chrome, Edge, Firefox or Safari browser, then reload."
+      );
+      return;
+    }
+
+    setLoading(true, "Preparing satellite imagery and map controls…");
+    let viewer;
+    try {
+      viewer = new Cesium.Viewer("cesiumContainer", {
+        baseLayer: false,
+        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+        animation: false,
+        timeline: false,
+        baseLayerPicker: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        infoBox: false,
+        selectionIndicator: true,
+        fullscreenButton: true,
+        vrButton: false,
+        shouldAnimate: true,
+        requestRenderMode: false
+      });
+    } catch (error) {
+      console.error("Cesium viewer could not be created", error);
+      showFatalError(
+        "The globe could not start",
+        "SkySphere could not create its 3D view. Reload the page; if the problem continues, check that browser hardware acceleration is enabled."
+      );
+      return;
+    }
     state.viewer = viewer;
 
     viewer.scene.globe.enableLighting = true;
@@ -610,7 +877,7 @@
     viewer.scene.globe.depthTestAgainstTerrain = false;
     viewer.scene.fog.enabled = true;
     viewer.scene.highDynamicRange = true;
-    viewer.scene.skyAtmosphere.hueShift = -0.02;
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.hueShift = -0.02;
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 80;
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = 80_000_000;
 
@@ -630,8 +897,10 @@
       }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-    wireEvents();
-    startTimer();
+    window.skySphereViewer = viewer;
+    window.dispatchEvent(new CustomEvent("skysphere-viewer-ready", { detail: { viewer } }));
+
+    startTimers();
     setLoading(true, "Requesting live aircraft near Stansted…");
     await refreshAircraft();
   }
@@ -640,5 +909,8 @@
     console.error(event.error || event.message);
   });
 
-  initialise();
+  initialise().catch((error) => {
+    console.error("SkySphere failed to initialise", error);
+    showFatalError("SkySphere could not start", "An unexpected error occurred. Reload the page to try again.");
+  });
 })();

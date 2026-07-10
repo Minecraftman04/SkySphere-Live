@@ -58,23 +58,24 @@
     uiReady: false,
     compassRaf: 0,
     updateAirportsTimer: 0,
+    lastFilterUpdate: 0,
     puterLoadPromise: null
   };
 
   function installViewerCapture() {
-    if (!window.Cesium?.Viewer || window.Cesium.Viewer.__skySphereWrapped) return;
-    const OriginalViewer = window.Cesium.Viewer;
-    function WrappedViewer(...args) {
-      const viewer = new OriginalViewer(...args);
+    const startFeatures = (viewer) => {
+      if (!viewer || featureState.uiReady) return;
       featureState.viewer = viewer;
       window.skySphereViewer = viewer;
       setTimeout(() => initialiseFeatures(viewer), 0);
-      return viewer;
+    };
+    if (window.skySphereViewer) {
+      startFeatures(window.skySphereViewer);
+    } else {
+      window.addEventListener("skysphere-viewer-ready", (event) => {
+        startFeatures(event.detail?.viewer);
+      }, { once: true });
     }
-    Object.setPrototypeOf(WrappedViewer, OriginalViewer);
-    WrappedViewer.prototype = OriginalViewer.prototype;
-    WrappedViewer.__skySphereWrapped = true;
-    window.Cesium.Viewer = WrappedViewer;
   }
 
   installViewerCapture();
@@ -96,13 +97,13 @@
     if (document.getElementById("skySphereFeatureStyles")) return;
     const style = createElement("style", { id: "skySphereFeatureStyles" });
     style.textContent = `
-      .sky-compass{position:absolute;z-index:12;top:92px;right:14px;display:grid;gap:7px;justify-items:center;pointer-events:auto}
+      .sky-compass{position:absolute;z-index:11;top:98px;right:58px;display:grid;gap:7px;justify-items:center;pointer-events:auto}
       .sky-compass-dial{width:92px;height:92px;border-radius:50%;position:relative;display:grid;place-items:center;background:rgba(4,14,27,.84);border:1px solid rgba(168,207,255,.25);box-shadow:0 12px 35px rgba(0,0,0,.35);backdrop-filter:blur(14px)}
       .sky-compass-rose{position:absolute;inset:8px;border-radius:50%;transition:transform .08s linear}
       .sky-compass-rose span{position:absolute;font-size:11px;font-weight:800;color:#dceaff}
       .sky-compass-rose .n{top:0;left:50%;transform:translateX(-50%);color:#ff7f8a}.sky-compass-rose .e{right:2px;top:50%;transform:translateY(-50%)}
       .sky-compass-rose .s{bottom:0;left:50%;transform:translateX(-50%)}.sky-compass-rose .w{left:2px;top:50%;transform:translateY(-50%)}
-      .sky-compass-pointer{position:absolute;top:7px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:14px solid #53d8ff;filter:drop-shadow(0 0 5px rgba(83,216,255,.8))}
+      .sky-compass-pointer{position:absolute;top:7px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:14px solid #71e7ff;filter:drop-shadow(0 0 5px rgba(113,231,255,.8))}
       .sky-compass-heading{font-size:15px;font-weight:800;color:white;margin-top:2px}.sky-north-button{min-height:34px!important;padding:6px 10px!important;background:rgba(4,14,27,.86)!important}
       .airport-tools{margin-top:12px;padding-top:12px;border-top:1px solid rgba(168,207,255,.18);display:grid;gap:9px}
       .airport-tools h3{margin:0;color:#dceaff;font-size:13px}.airport-search-row{display:grid;grid-template-columns:1fr auto;gap:7px}
@@ -110,15 +111,16 @@
       .airport-search-results{display:none;max-height:180px;overflow:auto;border:1px solid rgba(168,207,255,.18);border-radius:11px;background:rgba(4,14,27,.96)}
       .airport-search-results.show{display:block}.airport-result{display:block;width:100%;text-align:left;border:0!important;border-radius:0!important;background:transparent!important;padding:9px 10px!important;min-height:0!important}
       .airport-result:hover{background:rgba(83,216,255,.12)!important}.airport-result strong,.airport-result span{display:block}.airport-result span{font-size:10px;color:#a8b8ca;margin-top:2px}
+      .airport-result-empty{margin:0;padding:10px;color:#a8b8ca;font-size:10px}
       .airport-layer-toggle{display:flex;align-items:center;gap:7px;color:#a8b8ca;font-size:11px}.airport-layer-toggle input{accent-color:#53d8ff}
-      .airport-panel{position:absolute;z-index:13;right:14px;bottom:28px;width:min(410px,calc(100vw - 28px));max-height:70vh;overflow:auto;border-radius:20px;padding:17px;background:rgba(4,14,27,.91);border:1px solid rgba(168,207,255,.2);box-shadow:0 18px 48px rgba(0,0,0,.4);backdrop-filter:blur(18px)}
+      .airport-panel{position:absolute;z-index:17;right:14px;bottom:28px;width:min(410px,calc(100vw - 28px));max-height:70vh;overflow:auto;border-radius:20px;padding:17px;background:rgba(4,14,27,.93);border:1px solid rgba(168,207,255,.2);box-shadow:0 18px 48px rgba(0,0,0,.4);backdrop-filter:blur(20px)}
       .airport-panel.hidden{display:none}.airport-panel-close{position:absolute;right:10px;top:9px;width:32px;min-height:32px!important;border-radius:50%!important;padding:0!important}
       .airport-title{padding-right:35px}.airport-title h2{margin:0;font-size:21px}.airport-title p{margin:4px 0 0;color:#a8b8ca;font-size:11px}
       .airport-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:13px 0}.airport-weather{display:grid;gap:9px}.weather-card{padding:10px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
       .weather-card h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:0 0 6px;color:#78ffbf}.weather-card pre{white-space:pre-wrap;word-break:break-word;margin:0;color:#f4f8ff;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
       .airport-filter-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}.airport-filter-grid button{padding:8px 4px!important;font-size:10px!important}.airport-filter-grid button.active{background:rgba(83,216,255,.28)!important;border-color:#53d8ff!important}
       .airport-filter-note{font-size:9px;line-height:1.4;color:#a8b8ca;margin:7px 0 0}
-      @media(max-width:720px){.sky-compass{top:84px;right:10px}.sky-compass-dial{width:74px;height:74px}.sky-compass-heading{font-size:12px}.airport-panel{right:12px;bottom:12px;max-height:58vh}.airport-actions{grid-template-columns:1fr}.airport-filter-grid{grid-template-columns:1fr 1fr}}
+      @media(max-width:720px){.sky-compass{top:86px;right:52px}.sky-compass-dial{width:72px;height:72px}.sky-compass-heading{font-size:12px}.sky-north-button{font-size:9px!important}.airport-panel{right:8px;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-height:72vh}.airport-actions{grid-template-columns:1fr}.airport-filter-grid{grid-template-columns:1fr 1fr}}
     `;
     document.head.append(style);
   }
@@ -252,9 +254,9 @@
   function insertAirportTools() {
     const panel = document.querySelector(".control-panel");
     if (!panel || document.getElementById("airportTools")) return;
-    const searchInput = createElement("input", { id: "airportSearch", type: "search", placeholder: "Search airport name, ICAO or IATA", autocomplete: "off" });
-    const results = createElement("div", { class: "airport-search-results", id: "airportSearchResults" });
-    const searchButton = createElement("button", { type: "button", text: "Find" });
+    const searchInput = createElement("input", { id: "airportSearch", type: "search", placeholder: "Search airport name, ICAO or IATA", autocomplete: "off", "aria-label": "Search airports" });
+    const results = createElement("div", { class: "airport-search-results", id: "airportSearchResults", "aria-live": "polite" });
+    const searchButton = createElement("button", { type: "button", text: "Find", "aria-label": "Find airport" });
     const labelsToggle = createElement("input", { id: "airportLabelsToggle", type: "checkbox" });
     labelsToggle.checked = true;
     const tools = createElement("section", { class: "airport-tools", id: "airportTools" }, [createElement("h3", { text: "Airports & weather" }), createElement("div", { class: "airport-search-row" }, [searchInput, searchButton]), results, createElement("label", { class: "airport-layer-toggle" }, [labelsToggle, document.createTextNode("Airport labels")])]);
@@ -265,13 +267,18 @@
       const q = searchInput.value.trim().toLowerCase();
       if (!q) { results.classList.remove("show"); results.replaceChildren(); return; }
       const matches = featureState.airports.filter((a) => a.icao.toLowerCase().includes(q) || a.iata.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || (a.municipality || "").toLowerCase().includes(q)).slice(0, 12);
+      if (!matches.length) {
+        results.replaceChildren(createElement("p", { class: "airport-result-empty", text: "No matching airports found." }));
+        results.classList.add("show");
+        return;
+      }
       results.replaceChildren(...matches.map((airport) => {
         const button = createElement("button", { class: "airport-result", type: "button" });
         button.append(createElement("strong", { text: `${airport.icao}${airport.iata ? ` / ${airport.iata}` : ""} — ${airport.name}` }), createElement("span", { text: [airport.municipality, airport.country].filter(Boolean).join(", ") || airport.type.replace("_", " ") }));
         button.addEventListener("click", () => { searchInput.value = airport.icao; results.classList.remove("show"); selectAirport(airport); });
         return button;
       }));
-      results.classList.toggle("show", matches.length > 0);
+      results.classList.add("show");
     }
     searchInput.addEventListener("input", runSearch);
     searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); runSearch(); } });
@@ -281,10 +288,13 @@
 
   function createAirportPanel() {
     if (document.getElementById("airportPanel")) return;
-    const panel = createElement("aside", { class: "airport-panel hidden", id: "airportPanel" });
-    panel.innerHTML = `<button type="button" class="airport-panel-close" id="airportPanelClose" aria-label="Close airport panel">×</button><div class="airport-title"><h2 id="airportPanelName">Airport</h2><p id="airportPanelCode">—</p></div><div class="airport-actions"><button type="button" id="airportFlyButton">Fly to airport</button><button type="button" id="airportScanButton">Centre aircraft scan here</button></div><div class="airport-weather"><div class="weather-card"><h3>METAR</h3><pre id="airportMetar">Select an airport to load weather.</pre></div><div class="weather-card"><h3>TAF</h3><pre id="airportTaf">Select an airport to load weather.</pre></div></div><div class="airport-filter-grid" aria-label="Airport aircraft filters"><button type="button" data-filter="off" class="active">Off</button><button type="button" data-filter="both">Both</button><button type="button" data-filter="in">Inbound</button><button type="button" data-filter="out">Outbound</button></div><p class="airport-filter-note">Inbound/outbound is estimated from each aircraft’s live heading relative to this airport; public ADS-B does not provide a reliable filed destination for every aircraft.</p>`;
+    const panel = createElement("aside", { class: "airport-panel hidden", id: "airportPanel", "aria-label": "Selected airport details", inert: "" });
+    panel.innerHTML = `<button type="button" class="airport-panel-close" id="airportPanelClose" aria-label="Close airport panel">×</button><div class="airport-title"><span class="eyebrow">Selected airport</span><h2 id="airportPanelName">Airport</h2><p id="airportPanelCode">—</p></div><div class="airport-actions"><button type="button" id="airportFlyButton">Fly to airport</button><button type="button" id="airportScanButton">Scan aircraft around here</button></div><div class="airport-weather"><div class="weather-card"><h3>METAR</h3><pre id="airportMetar">Select an airport to load weather.</pre></div><div class="weather-card"><h3>TAF</h3><pre id="airportTaf">Select an airport to load weather.</pre></div></div><div class="airport-filter-grid" aria-label="Airport aircraft filters"><button type="button" data-filter="off" class="active">All traffic</button><button type="button" data-filter="both">Nearby</button><button type="button" data-filter="in">Inbound</button><button type="button" data-filter="out">Outbound</button></div><p class="airport-filter-note">Inbound/outbound is estimated from each aircraft’s position and track within 100 NM. It is not confirmation of a filed destination.</p>`;
     document.getElementById("app")?.append(panel);
-    panel.querySelector("#airportPanelClose").addEventListener("click", () => panel.classList.add("hidden"));
+    panel.querySelector("#airportPanelClose").addEventListener("click", () => {
+      panel.classList.add("hidden");
+      panel.inert = true;
+    });
     panel.querySelector("#airportFlyButton").addEventListener("click", () => flyToSelectedAirport(false));
     panel.querySelector("#airportScanButton").addEventListener("click", () => flyToSelectedAirport(true));
     for (const button of panel.querySelectorAll("[data-filter]")) button.addEventListener("click", () => setTrafficFilter(button.dataset.filter));
@@ -294,6 +304,10 @@
     featureState.selectedAirport = airport;
     const panel = document.getElementById("airportPanel");
     panel?.classList.remove("hidden");
+    if (panel) panel.inert = false;
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      window.dispatchEvent(new CustomEvent("skysphere-controls", { detail: { collapsed: true } }));
+    }
     document.getElementById("airportPanelName").textContent = airport.name;
     document.getElementById("airportPanelCode").textContent = `${airport.icao}${airport.iata ? ` / ${airport.iata}` : ""}${airport.municipality ? ` · ${airport.municipality}` : ""}`;
     loadAirportWeather(airport);
@@ -303,7 +317,18 @@
     const airport = featureState.selectedAirport;
     const viewer = featureState.viewer;
     if (!airport || !viewer) return;
-    viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(airport.lon, airport.lat, 180_000), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-72), roll: 0 }, duration: 1.35, complete: () => { if (centreScan) document.getElementById("scanViewBtn")?.click(); } });
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(airport.lon, airport.lat, 180_000),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-72), roll: 0 },
+      duration: 1.35,
+      complete: () => {
+        if (centreScan) {
+          window.dispatchEvent(new CustomEvent("skysphere-set-scan", {
+            detail: { lat: airport.lat, lon: airport.lon, name: `${airport.icao} · ${airport.name}` }
+          }));
+        }
+      }
+    });
   }
 
   async function ensurePuter() {
@@ -411,7 +436,14 @@
     featureState.airportDataSource = new Cesium.CustomDataSource("airports");
     viewer.dataSources.add(featureState.airportDataSource);
     viewer.camera.moveEnd.addEventListener(() => updateAirportLabels());
-    viewer.scene.preRender.addEventListener(() => { if (featureState.filterMode !== "off") applyTrafficFilter(); });
+    viewer.scene.preRender.addEventListener(() => {
+      const now = Date.now();
+      if (featureState.filterMode !== "off" && now - featureState.lastFilterUpdate >= 1000) {
+        featureState.lastFilterUpdate = now;
+        applyTrafficFilter();
+      }
+    });
+    window.addEventListener("skysphere-traffic-updated", () => applyTrafficFilter());
     addAirportClickHandler(viewer);
     featureState.airportByIcao = new Map(featureState.airports.map((airport) => [airport.icao, airport]));
     updateAirportLabels(true);

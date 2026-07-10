@@ -10,13 +10,16 @@ A browser-only, live 3D aircraft tracker that places ADS-B targets at their repo
 - Smooth dead-reckoned movement between API updates
 - Callsign, registration, type, altitude, speed, track, vertical rate and squawk details
 - Altitude stems, recent trails, labels and aircraft following
+- Colour-coded altitude key and adjustable icon/altitude scale
 - Camera compass with live heading and a **Point north** button
 - Worldwide large, medium and scheduled-service airport labels sourced from OurAirports
 - Airport search by name, ICAO or IATA code
 - Selectable airports with current raw METAR and TAF reports
 - Airport traffic filters for **Both**, **Inbound** and **Outbound**
 - Scan the centre of the current view, an airport, or the device location
-- Responsive controls for desktop, mobile and in-car browsers
+- Collapsible, touch-friendly controls for desktop, mobile and in-car browsers
+- Saved display preferences, offline awareness and clear stale-data labelling
+- Friendly recovery guidance when WebGL or an external service is unavailable
 - No API key stored in the repository
 
 ## Airport traffic filtering
@@ -31,6 +34,8 @@ The globe uses photorealistic satellite imagery, but it does not include Google 
 
 METAR and TAF availability varies by airport. Some airports publish a METAR but no TAF, and some publish neither.
 
+SkySphere stores only display preferences (such as map layers, scan radius and panel state) in the browser. It does not store a device location.
+
 ## Run locally
 
 Because browsers restrict some requests from `file://` pages, serve the folder locally:
@@ -40,6 +45,8 @@ py -m http.server 8000
 ```
 
 Then open `http://localhost:8000`.
+
+There is no build step. `index.html` loads the pinned CesiumJS release and the local JavaScript files directly.
 
 ## Publish with GitHub Pages
 

@@ -1,17 +1,16 @@
 /*
  * SkySphere Live network reliability layer.
  *
- * The UI timer currently wakes once per second to update its counters. This
- * wrapper prevents that timer from contacting the ADS-B providers more often
- * than once every 15 seconds. It also supplies controlled CORS fallbacks and
- * keeps a recent valid response available through short provider outages.
+ * ADS-B providers do not all expose identical browser CORS behaviour. This
+ * wrapper keeps direct requests first, tries controlled relay fallbacks, and
+ * can reuse a recent response for the exact same provider/location request.
+ * The application labels cached data and accounts for its real age.
  */
 (() => {
   "use strict";
 
   const nativeFetch = window.fetch.bind(window);
-  const MIN_REQUEST_INTERVAL_MS = 15_000;
-  const MAX_STALE_CACHE_MS = 120_000;
+  const MAX_STALE_CACHE_MS = 90_000;
   const REQUEST_TIMEOUT_MS = 12_000;
   const APPROVED_HOSTS = new Set([
     "api.airplanes.live",
@@ -19,12 +18,8 @@
     "api.adsb.lol"
   ]);
 
-  let nextRequestAt = 0;
-  let previousTarget = "";
-  let lastGood = null;
+  const lastGoodByTarget = new Map();
   let puterLoadPromise = null;
-
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function isAdsbRequest(input) {
     try {
@@ -40,13 +35,14 @@
     return input instanceof Request ? input.url : String(input);
   }
 
-  function responseFromText(text, source, stale = false) {
+  function responseFromText(text, source, { stale = false, cacheAgeMs = 0 } = {}) {
     return new Response(text, {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "X-SkySphere-Source": source,
-        "X-SkySphere-Stale": stale ? "1" : "0"
+        "X-SkySphere-Stale": stale ? "1" : "0",
+        "X-SkySphere-Cache-Age-Ms": String(Math.max(0, Math.round(cacheAgeMs)))
       }
     });
   }
@@ -146,46 +142,39 @@
         errors.push(`${attempt.name}: ${error?.message || error}`);
       }
     }
-
     throw new Error(errors.join("; "));
   }
 
-  window.fetch = async function skySphereFetch(input, init) {
-    if (!isAdsbRequest(input)) {
-      return nativeFetch(input, init);
+  function removeExpiredCache(now) {
+    for (const [url, cached] of lastGoodByTarget) {
+      if (now - cached.savedAt > MAX_STALE_CACHE_MS) lastGoodByTarget.delete(url);
     }
+  }
+
+  window.fetch = async function skySphereFetch(input, init) {
+    if (!isAdsbRequest(input)) return nativeFetch(input, init);
 
     const url = targetUrl(input);
-    const now = Date.now();
-
-    // Changing location, radius or provider should not be held behind the old
-    // area's timer. Repeated requests for the same endpoint are throttled.
-    if (url !== previousTarget) {
-      previousTarget = url;
-      nextRequestAt = 0;
-    }
-
-    const waitMs = Math.max(0, nextRequestAt - now);
-    if (waitMs > 0) await sleep(waitMs);
-    nextRequestAt = Date.now() + MIN_REQUEST_INTERVAL_MS;
-
     try {
       const result = await fetchAdsb(url);
-      lastGood = {
+      lastGoodByTarget.set(url, {
         text: result.text,
         source: result.source,
-        savedAt: Date.now(),
-        target: url
-      };
-      return responseFromText(result.text, result.source, false);
+        savedAt: Date.now()
+      });
+      removeExpiredCache(Date.now());
+      return responseFromText(result.text, result.source);
     } catch (error) {
       console.warn("SkySphere ADS-B network attempts failed", error);
-
-      if (lastGood && Date.now() - lastGood.savedAt <= MAX_STALE_CACHE_MS) {
-        console.info("SkySphere is temporarily using its last valid aircraft response.");
-        return responseFromText(lastGood.text, `${lastGood.source} cached`, true);
+      const cached = lastGoodByTarget.get(url);
+      const cacheAgeMs = cached ? Date.now() - cached.savedAt : Number.POSITIVE_INFINITY;
+      if (cached && cacheAgeMs <= MAX_STALE_CACHE_MS) {
+        console.info("SkySphere is temporarily using a recent response for this scan area.");
+        return responseFromText(cached.text, `${cached.source} cache`, {
+          stale: true,
+          cacheAgeMs
+        });
       }
-
       throw error;
     }
   };
